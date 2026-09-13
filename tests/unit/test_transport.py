@@ -131,8 +131,8 @@ async def test_default_transport_is_stdio():
 
 
 @pytest.mark.asyncio
-async def test_database_uri_path_is_used_when_database_uri_is_not_set(tmp_path):
-    """Test that DATABASE_URI_PATH is read by the application."""
+async def test_database_uri_file_is_used_when_database_uri_is_not_set(tmp_path):
+    """Test that DATABASE_URI_FILE is read by the application."""
     from postgres_mcp.server import main
 
     database_uri_file = tmp_path / "database-uri"
@@ -143,7 +143,7 @@ async def test_database_uri_path_is_used_when_database_uri_is_not_set(tmp_path):
         sys.argv = ["postgres_mcp"]
 
         with (
-            patch.dict(os.environ, {"DATABASE_URI_PATH": str(database_uri_file)}, clear=True),
+            patch.dict(os.environ, {"DATABASE_URI_FILE": str(database_uri_file)}, clear=True),
             patch("postgres_mcp.server.db_connection.pool_connect", AsyncMock()) as mock_pool_connect,
             patch("postgres_mcp.server.mcp.run_stdio_async", AsyncMock()),
         ):
@@ -155,7 +155,7 @@ async def test_database_uri_path_is_used_when_database_uri_is_not_set(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_database_uri_takes_precedence_over_database_uri_path(tmp_path):
+async def test_database_uri_takes_precedence_over_database_uri_file(tmp_path):
     """Test that DATABASE_URI keeps its existing precedence."""
     from postgres_mcp.server import main
 
@@ -171,7 +171,7 @@ async def test_database_uri_takes_precedence_over_database_uri_path(tmp_path):
                 os.environ,
                 {
                     "DATABASE_URI": "postgresql://env_user:password@localhost/env_db",
-                    "DATABASE_URI_PATH": str(database_uri_file),
+                    "DATABASE_URI_FILE": str(database_uri_file),
                 },
                 clear=True,
             ),

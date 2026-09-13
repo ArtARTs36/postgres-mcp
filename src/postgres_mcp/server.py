@@ -65,9 +65,9 @@ def get_database_url(database_url_arg: str | None) -> str | None:
     if "DATABASE_URI" in os.environ:
         return os.environ["DATABASE_URI"]
 
-    database_uri_path = os.environ.get("DATABASE_URI_PATH")
-    if database_uri_path:
-        with open(database_uri_path, encoding="utf-8") as database_uri_file:
+    database_uri_file_path = os.environ.get("DATABASE_URI_FILE")
+    if database_uri_file_path:
+        with open(database_uri_file_path, encoding="utf-8") as database_uri_file:
             return database_uri_file.read().strip()
 
     return database_url_arg
@@ -645,7 +645,7 @@ async def main():
     if not database_url:
         raise ValueError(
             "Error: No database URL provided. Please specify via 'DATABASE_URI' environment variable, "
-            "'DATABASE_URI_PATH' file path, or command-line argument.",
+            "'DATABASE_URI_FILE' file path, or command-line argument.",
         )
 
     # Initialize database connection pool
