@@ -9,10 +9,12 @@ from enum import Enum
 from typing import Any
 from typing import List
 from typing import Literal
+from typing import Mapping
 from typing import Union
 
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from pydantic import validate_call
@@ -40,6 +42,8 @@ mcp = FastMCP("postgres-mcp")
 # Constants
 PG_STAT_STATEMENTS = "pg_stat_statements"
 HYPOPG_EXTENSION = "hypopg"
+MCP_ALLOWED_HOSTS_ENV = "MCP_ALLOWED_HOSTS"
+NETWORK_TRANSPORTS = {"sse", "streamable-http"}
 
 ResponseType = List[types.TextContent | types.ImageContent | types.EmbeddedResource]
 
@@ -57,6 +61,85 @@ class AccessMode(str, Enum):
 db_connection = DbConnPool()
 current_access_mode = AccessMode.UNRESTRICTED
 shutdown_in_progress = False
+
+
+def parse_allowed_hosts(value: str) -> list[str]:
+    """Parse comma-separated allowed host patterns."""
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def resolve_allowed_hosts(cli_allowed_hosts: list[str] | None, environ: Mapping[str, str] | None = None) -> list[str]:
+    """Resolve allowed hosts with environment variables taking precedence."""
+    environ = environ if environ is not None else os.environ
+    env_allowed_hosts = environ.get(MCP_ALLOWED_HOSTS_ENV)
+    if env_allowed_hosts is not None:
+        return parse_allowed_hosts(env_allowed_hosts)
+
+    return cli_allowed_hosts or []
+
+
+def apply_transport_security_settings(server: FastMCP, transport: str, allowed_hosts: list[str]) -> None:
+    """Configure HTTP transport security when custom allowed hosts are supplied."""
+    if transport not in NETWORK_TRANSPORTS or not allowed_hosts:
+        return
+
+    server.settings.transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+    )
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="PostgreSQL MCP Server")
+    parser.add_argument("database_url", help="Database connection URL", nargs="?")
+    parser.add_argument(
+        "--access-mode",
+        type=str,
+        choices=[mode.value for mode in AccessMode],
+        default=AccessMode.UNRESTRICTED.value,
+        help="Set SQL access mode: unrestricted (unrestricted) or restricted (read-only with protections)",
+    )
+    parser.add_argument(
+        "--transport",
+        type=str,
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help="Select MCP transport: stdio (default), sse, or streamable-http",
+    )
+    parser.add_argument(
+        "--allowed-host",
+        action="append",
+        default=None,
+        help=(
+            "Allowed HTTP Host header pattern for SSE/streamable HTTP. "
+            "Can be repeated; MCP_ALLOWED_HOSTS takes precedence."
+        ),
+    )
+    parser.add_argument(
+        "--sse-host",
+        type=str,
+        default="localhost",
+        help="Host to bind SSE server to (default: localhost)",
+    )
+    parser.add_argument(
+        "--sse-port",
+        type=int,
+        default=8000,
+        help="Port for SSE server (default: 8000)",
+    )
+    parser.add_argument(
+        "--streamable-http-host",
+        type=str,
+        default="localhost",
+        help="Host to bind streamable HTTP server to (default: localhost)",
+    )
+    parser.add_argument(
+        "--streamable-http-port",
+        type=int,
+        default=8000,
+        help="Port for streamable HTTP server (default: 8000)",
+    )
+    return parser
 
 
 async def get_sql_driver() -> Union[SqlDriver, SafeSqlDriver]:
@@ -556,48 +639,9 @@ async def get_top_queries(
 
 async def main():
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="PostgreSQL MCP Server")
-    parser.add_argument("database_url", help="Database connection URL", nargs="?")
-    parser.add_argument(
-        "--access-mode",
-        type=str,
-        choices=[mode.value for mode in AccessMode],
-        default=AccessMode.UNRESTRICTED.value,
-        help="Set SQL access mode: unrestricted (unrestricted) or restricted (read-only with protections)",
-    )
-    parser.add_argument(
-        "--transport",
-        type=str,
-        choices=["stdio", "sse", "streamable-http"],
-        default="stdio",
-        help="Select MCP transport: stdio (default), sse, or streamable-http",
-    )
-    parser.add_argument(
-        "--sse-host",
-        type=str,
-        default="localhost",
-        help="Host to bind SSE server to (default: localhost)",
-    )
-    parser.add_argument(
-        "--sse-port",
-        type=int,
-        default=8000,
-        help="Port for SSE server (default: 8000)",
-    )
-    parser.add_argument(
-        "--streamable-http-host",
-        type=str,
-        default="localhost",
-        help="Host to bind streamable HTTP server to (default: localhost)",
-    )
-    parser.add_argument(
-        "--streamable-http-port",
-        type=int,
-        default=8000,
-        help="Port for streamable HTTP server (default: 8000)",
-    )
-
+    parser = build_arg_parser()
     args = parser.parse_args()
+    allowed_hosts = resolve_allowed_hosts(args.allowed_host)
 
     # Store the access mode in the global variable
     global current_access_mode
@@ -662,10 +706,12 @@ async def main():
     elif args.transport == "sse":
         mcp.settings.host = args.sse_host
         mcp.settings.port = args.sse_port
+        apply_transport_security_settings(mcp, args.transport, allowed_hosts)
         await mcp.run_sse_async()
     elif args.transport == "streamable-http":
         mcp.settings.host = args.streamable_http_host
         mcp.settings.port = args.streamable_http_port
+        apply_transport_security_settings(mcp, args.transport, allowed_hosts)
         await mcp.run_streamable_http_async()
 
 

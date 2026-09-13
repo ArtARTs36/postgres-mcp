@@ -276,6 +276,27 @@ For Windsurf, the format in `mcp_config.json` is slightly different:
 }
 ```
 
+### Allowed Hosts for HTTP Transports
+
+FastMCP validates the HTTP `Host` header for network transports to protect against DNS rebinding attacks. When serving Postgres MCP Pro behind a reverse proxy, Docker network name, or custom domain, configure the hosts that should be accepted.
+
+For example:
+
+```bash
+postgres-mcp \
+  --transport=streamable-http \
+  --allowed-host mcp.example.com \
+  --allowed-host 'mcp.example.com:*'
+```
+
+You can also configure the same values through the environment:
+
+```text
+MCP_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:*
+```
+
+`MCP_ALLOWED_HOSTS` takes precedence over `--allowed-host`. FastMCP treats a hostname without a port and the same hostname with a port as separate patterns, so deployments may need both `mcp.example.com` and `mcp.example.com:*`.
+
 ## Postgres Extension Installation (Optional)
 
 To enable index tuning and comprehensive performance analysis you need to load the `pg_stat_statements` and `hypopg` extensions on your database.
